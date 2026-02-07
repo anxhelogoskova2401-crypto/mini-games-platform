@@ -1,0 +1,85 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                  String          @id @default(cuid())
+  email               String          @unique
+  username            String          @unique
+  password            String
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  wallet              CoinWallet?
+  friendsInitiated    Friend[]        @relation("UserFriends")
+  friendsReceived     Friend[]        @relation("FriendUser")
+  sentRequests        FriendRequest[] @relation("RequestSender")
+  receivedRequests    FriendRequest[] @relation("RequestReceiver")
+}
+
+model CoinWallet {
+  id           String        @id @default(cuid())
+  userId       String        @unique
+  balance      Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+}
+
+enum TransactionType {
+  EARN
+  SPEND
+  BONUS
+  REFUND
+}
+
+model Transaction {
+  id          String          @id @default(cuid())
+  walletId    String
+  type        TransactionType
+  amount      Int
+  description String
+  gameId      String?
+  createdAt   DateTime        @default(now())
+  wallet      CoinWallet      @relation(fields: [walletId], references: [id], onDelete: Cascade)
+}
+
+model Friend {
+  id        String   @id @default(cuid())
+  userId    String
+  friendId  String
+  createdAt DateTime @default(now())
+  user      User     @relation("UserFriends", fields: [userId], references: [id], onDelete: Cascade)
+  friend    User     @relation("FriendUser", fields: [friendId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, friendId])
+  @@index([userId])
+  @@index([friendId])
+}
+
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+model FriendRequest {
+  id         String              @id @default(cuid())
+  senderId   String
+  receiverId String
+  status     FriendRequestStatus @default(PENDING)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  sender     User                @relation("RequestSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver   User                @relation("RequestReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+  @@index([receiverId, status])
+}
