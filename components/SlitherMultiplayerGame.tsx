@@ -71,6 +71,7 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
     gameType: string;
   } | null>(null);
   const [socketConnected, setSocketConnected] = useState(false);
+  const [queueInfo, setQueueInfo] = useState<{ playersInQueue: number; playersNeeded: number } | null>(null);
 
   const router = useRouter();
 
@@ -127,12 +128,22 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
       console.error("Socket connection error:", err.message);
     });
 
+    socketRef.current.on("queue-update", (data: { playersInQueue: number; playersNeeded: number }) => {
+      setQueueInfo(data);
+    });
+
+    socketRef.current.on("matchmaking-cancelled", () => {
+      setSearching(false);
+      setQueueInfo(null);
+    });
+
     socketRef.current.on("match-found", (data) => {
       playerIdRef.current = data.playerId;
       gameStateRef.current = data.gameState;
       setPlayerId(data.playerId);
       setGameState(data.gameState);
       setSearching(false);
+      setQueueInfo(null);
       setPlayerDead(false);
       setSpectating(false);
       // Set player's team for correct win/lose display
@@ -198,6 +209,8 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
       if (socketRef.current) {
         socketRef.current.off("connect");
         socketRef.current.off("connect_error");
+        socketRef.current.off("queue-update");
+        socketRef.current.off("matchmaking-cancelled");
         socketRef.current.off("match-found");
         socketRef.current.off("game-update");
         socketRef.current.off("player-disconnected");
@@ -799,14 +812,38 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
         )}
 
         {searching && (
-          <div className="bg-[#1a2c38] p-8 rounded-xl max-w-md">
+          <div className="bg-[#1a2c38] p-8 rounded-xl max-w-md text-center">
             <div className="animate-pulse text-4xl mb-4">
               {playMode === "offline" ? "🎮" : "⚔️"}
             </div>
             <h2 className="text-2xl font-bold text-white mb-2">
-              {playMode === "offline" ? "Starting Practice..." : "Preparing Battle..."}
+              {playMode === "offline" ? "Starting Practice..." : "Searching for Players..."}
             </h2>
-            <p className="text-gray-400">Creating {gameMode} match with bots!</p>
+            {playMode === "online" && queueInfo ? (
+              <>
+                <p className="text-gray-400 mb-1">
+                  {queueInfo.playersInQueue} / {queueInfo.playersNeeded} players found
+                </p>
+                <div className="w-full bg-gray-700 rounded-full h-3 mb-4">
+                  <div
+                    className="bg-yellow-500 h-3 rounded-full transition-all"
+                    style={{ width: `${(queueInfo.playersInQueue / queueInfo.playersNeeded) * 100}%` }}
+                  />
+                </div>
+                <button
+                  onClick={() => {
+                    socketRef.current?.emit("cancel-matchmaking");
+                    setSearching(false);
+                    setQueueInfo(null);
+                  }}
+                  className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold transition-all"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <p className="text-gray-400">Creating {gameMode} match with bots!</p>
+            )}
           </div>
         )}
 

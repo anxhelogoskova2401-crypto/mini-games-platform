@@ -28,6 +28,9 @@ const io = new Server(httpServer, {
 const waitingPlayers = [];
 const activeGames = new Map();
 const matchmakingTimers = new Map();
+
+// Online matchmaking queues: key = gameMode (e.g. "1v1", "2v2", "5v5")
+const matchmakingQueues = new Map(); // gameMode -> [{ socket, playerData }]
 const onlineUsers = new Map(); // socketId -> userId
 const userSockets = new Map(); // userId -> socketId
 const gameInvites = new Map(); // inviteId -> invite data
@@ -242,13 +245,25 @@ io.on("connection", (socket) => {
 
   socket.on("find-match", (data) => {
     const gameMode = data.gameMode || "5v5";
-    if (gameMode === "1v1") {
-      create1v1Game(socket, data);
-    } else if (gameMode === "2v2") {
-      create2v2Game(socket, data);
+    const playMode = data.playMode || "offline";
+
+    if (playMode === "online") {
+      joinMatchmakingQueue(socket, data, gameMode);
     } else {
-      create5v5Game(socket, data);
+      // Offline: instant game with bots
+      if (gameMode === "1v1") {
+        create1v1Game(socket, data);
+      } else if (gameMode === "2v2") {
+        create2v2Game(socket, data);
+      } else {
+        create5v5Game(socket, data);
+      }
     }
+  });
+
+  socket.on("cancel-matchmaking", () => {
+    removeFromAllQueues(socket);
+    socket.emit("matchmaking-cancelled");
   });
 
   socket.on("update-direction", (data) => {
@@ -278,6 +293,9 @@ io.on("connection", (socket) => {
       io.emit("user-status-changed", { userId, online: false });
     }
 
+    // Remove from matchmaking queues
+    removeFromAllQueues(socket);
+
     if (matchmakingTimers.has(socket.id)) {
       clearTimeout(matchmakingTimers.get(socket.id));
       matchmakingTimers.delete(socket.id);
@@ -305,7 +323,115 @@ io.on("connection", (socket) => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// GAME CREATION FUNCTIONS
+// ONLINE MATCHMAKING
+// ════════════════════════════════════════════════════════════════════════════
+
+const REQUIRED_PLAYERS = { "1v1": 2, "2v2": 4, "5v5": 10 };
+
+function removeFromAllQueues(socket) {
+  for (const [mode, queue] of matchmakingQueues.entries()) {
+    const idx = queue.findIndex((p) => p.socket.id === socket.id);
+    if (idx !== -1) {
+      queue.splice(idx, 1);
+      // Notify remaining players in queue about updated count
+      queue.forEach((p) => {
+        p.socket.emit("queue-update", {
+          playersInQueue: queue.length,
+          playersNeeded: REQUIRED_PLAYERS[mode] || 10,
+        });
+      });
+    }
+  }
+}
+
+function joinMatchmakingQueue(socket, playerData, gameMode) {
+  if (!matchmakingQueues.has(gameMode)) {
+    matchmakingQueues.set(gameMode, []);
+  }
+
+  const queue = matchmakingQueues.get(gameMode);
+
+  // Don't add if already in queue
+  if (queue.find((p) => p.socket.id === socket.id)) return;
+
+  queue.push({ socket, playerData });
+
+  const needed = REQUIRED_PLAYERS[gameMode] || 10;
+
+  // Notify all players in queue
+  queue.forEach((p) => {
+    p.socket.emit("queue-update", {
+      playersInQueue: queue.length,
+      playersNeeded: needed,
+    });
+  });
+
+  // Check if we have enough players
+  if (queue.length >= needed) {
+    startOnlineGame(gameMode, queue.splice(0, needed));
+  }
+}
+
+function startOnlineGame(gameMode, matchedPlayers) {
+  const gameId = `game-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const players = {};
+  const teamSize = matchedPlayers.length / 2;
+
+  const getSpawnPosition = (team) => {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 600 + Math.random() * 300;
+    const side = team === "green" ? -1 : 1;
+    return {
+      x: Math.cos(angle) * radius * side * 1.2,
+      y: Math.sin(angle) * radius,
+    };
+  };
+
+  // Assign first half to green, second half to red
+  matchedPlayers.forEach((entry, i) => {
+    const team = i < teamSize ? "green" : "red";
+    const pos = getSpawnPosition(team);
+    players[entry.socket.id] = {
+      id: entry.socket.id,
+      username: entry.playerData.username || "Player",
+      x: pos.x,
+      y: pos.y,
+      segments: [{ x: pos.x, y: pos.y }],
+      direction: { x: team === "green" ? 1 : -1, y: 0 },
+      score: 0,
+      color: team === "green" ? "#00e701" : "#ff4444",
+      alive: true,
+      betAmount: entry.playerData.betAmount || 0,
+      isBot: false,
+      team,
+    };
+  });
+
+  const foodCount = gameMode === "1v1" ? 100 : gameMode === "2v2" ? 120 : 150;
+  const gameState = {
+    id: gameId,
+    players,
+    food: generateFood(foodCount),
+    startTime: Date.now(),
+    botDifficulty: "medium",
+    botPositionHistory: {},
+  };
+
+  activeGames.set(gameId, gameState);
+
+  // Join all players to the game room and notify them
+  matchedPlayers.forEach((entry) => {
+    entry.socket.join(gameId);
+    entry.socket.emit("match-found", {
+      gameId,
+      playerId: entry.socket.id,
+      gameState: serializeGameState(gameState),
+    });
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// GAME CREATION FUNCTIONS (OFFLINE / BOT GAMES)
 // ════════════════════════════════════════════════════════════════════════════
 
 function create5v5Game(socket, playerData) {
