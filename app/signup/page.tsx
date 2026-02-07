@@ -10,6 +10,7 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [signedUp, setSignedUp] = useState(false);
   const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -29,7 +30,7 @@ export default function SignupPage() {
       if (!response.ok) {
         setError(data.error || "Signup failed");
       } else {
-        router.push("/login?signup=success");
+        setSignedUp(true);
       }
     } catch (err) {
       setError("An error occurred. Please try again.");
@@ -49,10 +50,27 @@ export default function SignupPage() {
           <span style={{ color: 'var(--gold)' }}>Games</span>
         </h1>
         <p className="text-center mb-6 text-sm font-medium" style={{ color: 'var(--text-dimmed)' }}>
-          Create your account
+          {signedUp ? "Almost there!" : "Create your account"}
         </p>
 
-        {error && (
+        {signedUp && (
+          <div className="text-center">
+            <div className="text-5xl mb-4">📧</div>
+            <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--text)' }}>Check your email</h2>
+            <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
+              We sent a verification link to <strong style={{ color: 'var(--gold)' }}>{email}</strong>. Click the link to activate your account.
+            </p>
+            <Link
+              href="/login"
+              className="inline-block px-6 py-3 rounded-lg font-bold transition-all"
+              style={{ background: 'var(--gold)', color: '#000' }}
+            >
+              Go to Login
+            </Link>
+          </div>
+        )}
+
+        {!signedUp && error && (
           <div className="px-4 py-3 rounded-lg mb-4" style={{
             background: 'var(--panel2)',
             border: '1px solid var(--error)',
@@ -62,7 +80,7 @@ export default function SignupPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        {!signedUp && <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block mb-2 text-sm font-bold" style={{ color: 'var(--text-muted)' }}>Email</label>
             <input
@@ -162,27 +180,31 @@ export default function SignupPage() {
           >
             {loading ? "Creating account..." : "Sign Up"}
           </button>
-        </form>
+        </form>}
 
-        <p className="text-center mt-6 text-sm" style={{ color: 'var(--text-muted)' }}>
-          Already have an account?{" "}
-          <Link href="/login" className="font-bold transition-colors" style={{ color: 'var(--gold)' }}
-            onMouseEnter={(e) => e.currentTarget.style.color = 'var(--gold-hover)'}
-            onMouseLeave={(e) => e.currentTarget.style.color = 'var(--gold)'}
-          >
-            Login
-          </Link>
-        </p>
+        {!signedUp && (
+          <>
+            <p className="text-center mt-6 text-sm" style={{ color: 'var(--text-muted)' }}>
+              Already have an account?{" "}
+              <Link href="/login" className="font-bold transition-colors" style={{ color: 'var(--gold)' }}
+                onMouseEnter={(e) => e.currentTarget.style.color = 'var(--gold-hover)'}
+                onMouseLeave={(e) => e.currentTarget.style.color = 'var(--gold)'}
+              >
+                Login
+              </Link>
+            </p>
 
-        <div className="mt-6 p-4 rounded-lg flex items-center gap-3" style={{
-          background: 'var(--panel2)',
-          border: '1px solid var(--gold)'
-        }}>
-          <span className="text-2xl">🪙</span>
-          <p className="text-sm font-bold" style={{ color: 'var(--gold)' }}>
-            New users get 100 free coins!
-          </p>
-        </div>
+            <div className="mt-6 p-4 rounded-lg flex items-center gap-3" style={{
+              background: 'var(--panel2)',
+              border: '1px solid var(--gold)'
+            }}>
+              <span className="text-2xl">🪙</span>
+              <p className="text-sm font-bold" style={{ color: 'var(--gold)' }}>
+                New users get 100 free coins!
+              </p>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

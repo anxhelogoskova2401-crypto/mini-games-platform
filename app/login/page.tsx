@@ -1,16 +1,38 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
+  return (
+    <Suspense>
+      <LoginContent />
+    </Suspense>
+  );
+}
+
+function LoginContent() {
+  const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const verified = searchParams.get("verified");
+    const err = searchParams.get("error");
+    if (verified === "true") {
+      setSuccess("Email verified! You can now log in.");
+    } else if (verified === "already") {
+      setSuccess("Email already verified. You can log in.");
+    } else if (err === "invalid-token") {
+      setError("Invalid or expired verification link.");
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,13 +41,13 @@ export default function LoginPage() {
 
     try {
       const result = await signIn("credentials", {
-        email,
+        login,
         password,
         redirect: false,
       });
 
       if (result?.error) {
-        setError("Invalid email or password");
+        setError("Invalid email/username or password");
       } else {
         router.push("/dashboard");
         router.refresh();
@@ -51,6 +73,16 @@ export default function LoginPage() {
           Login to your account
         </p>
 
+        {success && (
+          <div className="px-4 py-3 rounded-lg mb-4" style={{
+            background: 'var(--panel2)',
+            border: '1px solid #22c55e',
+            color: '#22c55e'
+          }}>
+            {success}
+          </div>
+        )}
+
         {error && (
           <div className="px-4 py-3 rounded-lg mb-4" style={{
             background: 'var(--panel2)',
@@ -63,11 +95,11 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block mb-2 text-sm font-bold" style={{ color: 'var(--text-muted)' }}>Email</label>
+            <label className="block mb-2 text-sm font-bold" style={{ color: 'var(--text-muted)' }}>Email or Username</label>
             <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              type="text"
+              value={login}
+              onChange={(e) => setLogin(e.target.value)}
               className="w-full px-4 py-3 rounded-lg focus:outline-none transition-all"
               style={{
                 background: 'var(--panel2)',

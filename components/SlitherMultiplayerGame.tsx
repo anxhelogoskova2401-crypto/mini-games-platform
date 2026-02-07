@@ -915,13 +915,6 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
                   </button>
 
                   <button
-                    onClick={startSpectatingFromMenu}
-                    className="w-full bg-blue-500 text-white font-bold py-3 px-6 rounded-lg hover:bg-blue-600 transition mb-3"
-                  >
-                    Spectate
-                  </button>
-
-                  <button
                     onClick={quitToDashboard}
                     className="w-full bg-red-500 text-white font-bold py-3 px-6 rounded-lg hover:bg-red-600 transition"
                   >
