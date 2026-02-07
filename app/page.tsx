@@ -35,37 +35,21 @@ export default async function Home() {
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link
                 href="/signup"
-                className="px-8 py-4 rounded-lg font-bold text-lg transition-all"
+                className="px-8 py-4 rounded-lg font-bold text-lg transition-all hover:-translate-y-0.5"
                 style={{
                   background: 'var(--gold)',
                   color: '#000'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'var(--gold-hover)';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'var(--gold)';
-                  e.currentTarget.style.transform = 'translateY(0)';
                 }}
               >
                 Sign Up Free
               </Link>
               <Link
                 href="/login"
-                className="px-8 py-4 rounded-lg font-bold text-lg transition-all"
+                className="px-8 py-4 rounded-lg font-bold text-lg transition-all hover:-translate-y-0.5 hover:border-[var(--gold)]"
                 style={{
                   background: 'var(--panel2)',
                   border: '2px solid var(--border)',
                   color: 'var(--text)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = 'var(--gold)';
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'var(--border)';
-                  e.currentTarget.style.transform = 'translateY(0)';
                 }}
               >
                 Login
