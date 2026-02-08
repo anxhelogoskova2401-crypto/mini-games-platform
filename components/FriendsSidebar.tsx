@@ -44,6 +44,7 @@ interface LobbyData {
   players: LobbyPlayer[];
   hostId: string;
   status: string;
+  fillMode?: "bots" | "players";
 }
 
 interface FriendsSidebarProps {
@@ -137,6 +138,21 @@ export default function FriendsSidebar({ userId }: FriendsSidebarProps) {
       alert(`Lobby closed: ${data.reason}`);
     });
 
+    socket.on("lobby-matchmaking-started", () => {
+      setCurrentLobby((prev) => prev ? { ...prev, status: "matchmaking" } : null);
+    });
+
+    // When lobby matchmaking finds a game (players fill mode)
+    socket.on("match-found", (data: { gameId: string; playerId: string }) => {
+      sessionStorage.setItem("lobbyGameData", JSON.stringify({
+        gameId: data.gameId,
+        playerId: data.playerId,
+        gameType: currentLobby?.gameType || "5v5",
+      }));
+      setCurrentLobby(null);
+      router.push("/games/slither-battle?fromLobby=true");
+    });
+
     setSocketRef(socket);
 
     return () => {
@@ -150,6 +166,8 @@ export default function FriendsSidebar({ userId }: FriendsSidebarProps) {
       socket.off("lobby-countdown");
       socket.off("lobby-game-start");
       socket.off("lobby-closed");
+      socket.off("lobby-matchmaking-started");
+      socket.off("match-found");
     };
   }, [userId, router]);
 
@@ -283,13 +301,22 @@ export default function FriendsSidebar({ userId }: FriendsSidebarProps) {
     }
   };
 
-  const inviteFriend = (friendId: string, gameType: "1v1" | "2v2") => {
+  const inviteFriend = (friendId: string, gameType: "1v1" | "2v2" | "5v5") => {
     if (socketRef) {
       socketRef.emit("game-invite", {
         friendId,
         gameType,
       });
       alert(`Invitation sent for ${gameType} game!`);
+    }
+  };
+
+  const setFillMode = (mode: "bots" | "players") => {
+    if (socketRef && currentLobby) {
+      socketRef.emit("lobby-set-fill-mode", {
+        lobbyId: currentLobby.lobbyId,
+        fillMode: mode,
+      });
     }
   };
 
@@ -336,6 +363,8 @@ export default function FriendsSidebar({ userId }: FriendsSidebarProps) {
           onReady={handleLobbyReady}
           onLeave={handleLobbyLeave}
           countdown={lobbyCountdown}
+          isHost={currentLobby.hostId === userId}
+          onSetFillMode={setFillMode}
         />
         <div className="w-80 border-l p-6 flex flex-col" style={{
           background: 'var(--bg-elevated)',
@@ -498,10 +527,10 @@ export default function FriendsSidebar({ userId }: FriendsSidebarProps) {
                       </button>
                     </div>
                     {friend.online && (
-                      <div className="flex gap-2">
+                      <div className="grid grid-cols-3 gap-1">
                         <button
                           onClick={() => inviteFriend(friend.user.id, "1v1")}
-                          className="flex-1 text-xs py-1 px-2 rounded font-bold transition-all"
+                          className="text-xs py-1 px-2 rounded font-bold transition-all"
                           style={{
                             background: 'var(--accent)',
                             color: '#fff'
@@ -513,11 +542,11 @@ export default function FriendsSidebar({ userId }: FriendsSidebarProps) {
                             e.currentTarget.style.background = 'var(--accent)';
                           }}
                         >
-                          1v1 Invite
+                          1v1
                         </button>
                         <button
                           onClick={() => inviteFriend(friend.user.id, "2v2")}
-                          className="flex-1 text-xs py-1 px-2 rounded font-bold transition-all"
+                          className="text-xs py-1 px-2 rounded font-bold transition-all"
                           style={{
                             background: 'var(--panel2)',
                             border: '1px solid var(--border)',
@@ -530,7 +559,24 @@ export default function FriendsSidebar({ userId }: FriendsSidebarProps) {
                             e.currentTarget.style.borderColor = 'var(--border)';
                           }}
                         >
-                          2v2 Invite
+                          2v2
+                        </button>
+                        <button
+                          onClick={() => inviteFriend(friend.user.id, "5v5")}
+                          className="text-xs py-1 px-2 rounded font-bold transition-all"
+                          style={{
+                            background: 'var(--panel2)',
+                            border: '1px solid var(--border)',
+                            color: 'var(--text)'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--gold)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--border)';
+                          }}
+                        >
+                          5v5
                         </button>
                       </div>
                     )}

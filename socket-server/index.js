@@ -114,6 +114,7 @@ io.on("connection", (socket) => {
         { odrediserId: receiverId, odrediserSocketId: socket.id, ready: false },
       ],
       status: "waiting",
+      fillMode: "bots",
     };
 
     gameLobbies.set(lobbyId, lobby);
@@ -129,6 +130,7 @@ io.on("connection", (socket) => {
       })),
       hostId: invite.senderId,
       status: lobby.status,
+      fillMode: lobby.fillMode,
     };
 
     io.to(senderSocketId).emit("lobby-created", lobbyData);
@@ -151,6 +153,31 @@ io.on("connection", (socket) => {
     }
   });
 
+  // Host sets fill mode
+  socket.on("lobby-set-fill-mode", (data) => {
+    const { lobbyId, fillMode } = data;
+    const userId = onlineUsers.get(socket.id);
+    const lobby = gameLobbies.get(lobbyId);
+    if (!lobby || lobby.hostId !== userId) return;
+    if (!["bots", "players"].includes(fillMode)) return;
+    lobby.fillMode = fillMode;
+
+    const lobbyData = {
+      lobbyId,
+      gameType: lobby.gameType,
+      players: lobby.players.map((p) => ({
+        odrediserId: p.odrediserId,
+        ready: p.ready,
+      })),
+      hostId: lobby.hostId,
+      status: lobby.status,
+      fillMode: lobby.fillMode,
+    };
+    lobby.players.forEach((p) => {
+      io.to(p.odrediserSocketId).emit("lobby-updated", lobbyData);
+    });
+  });
+
   // Player ready in lobby
   socket.on("lobby-ready", (data) => {
     const { lobbyId } = data;
@@ -161,6 +188,8 @@ io.on("connection", (socket) => {
       socket.emit("error", { message: "Lobby not found" });
       return;
     }
+
+    if (lobby.status !== "waiting") return;
 
     const player = lobby.players.find((p) => p.odrediserId === odrediserId);
     if (player) {
@@ -176,6 +205,7 @@ io.on("connection", (socket) => {
       })),
       hostId: lobby.hostId,
       status: lobby.status,
+      fillMode: lobby.fillMode,
     };
 
     lobby.players.forEach((p) => {
@@ -183,20 +213,24 @@ io.on("connection", (socket) => {
     });
 
     const allReady = lobby.players.every((p) => p.ready);
-    if (allReady && lobby.status === "waiting") {
-      lobby.status = "countdown";
-      lobby.countdownStart = Date.now();
+    if (allReady) {
+      if (lobby.fillMode === "players" && lobby.gameType !== "1v1") {
+        enterLobbyMatchmaking(lobbyId);
+      } else {
+        lobby.status = "countdown";
+        lobby.countdownStart = Date.now();
 
-      lobby.players.forEach((p) => {
-        io.to(p.odrediserSocketId).emit("lobby-countdown", { lobbyId, seconds: 3 });
-      });
+        lobby.players.forEach((p) => {
+          io.to(p.odrediserSocketId).emit("lobby-countdown", { lobbyId, seconds: 3 });
+        });
 
-      setTimeout(() => {
-        const currentLobby = gameLobbies.get(lobbyId);
-        if (currentLobby && currentLobby.status === "countdown") {
-          startGameFromLobby(lobbyId);
-        }
-      }, 3000);
+        setTimeout(() => {
+          const currentLobby = gameLobbies.get(lobbyId);
+          if (currentLobby && currentLobby.status === "countdown") {
+            startGameFromLobby(lobbyId);
+          }
+        }, 3000);
+      }
     }
   });
 
@@ -285,6 +319,15 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     const userId = onlineUsers.get(socket.id);
     if (userId) {
+      // If user is in a matchmaking lobby, leave it (cleans up queue too)
+      const lobbyId = userLobbies.get(userId);
+      if (lobbyId) {
+        const lobby = gameLobbies.get(lobbyId);
+        if (lobby && lobby.status === "matchmaking") {
+          leaveLobby(userId, lobbyId);
+        }
+      }
+
       onlineUsers.delete(socket.id);
       userSockets.delete(userId);
 
@@ -672,6 +715,8 @@ function create2v2Game(socket, playerData) {
   });
 }
 
+const PLAYERS_PER_TEAM = { "1v1": 1, "2v2": 2, "5v5": 5 };
+
 function startGameFromLobby(lobbyId) {
   const lobby = gameLobbies.get(lobbyId);
   if (!lobby) return;
@@ -692,8 +737,11 @@ function startGameFromLobby(lobbyId) {
     };
   };
 
+  // Assign human players: 1v1 = opponents, 2v2/5v5 = both on green (teammates)
   lobby.players.forEach((lobbyPlayer, index) => {
-    const team = index === 0 ? "green" : "red";
+    const team = lobby.gameType === "1v1"
+      ? (index === 0 ? "green" : "red")
+      : "green";
     const pos = getSpawnPosition(team);
     const odrediserSocket = io.sockets.sockets.get(lobbyPlayer.odrediserSocketId);
 
@@ -718,13 +766,17 @@ function startGameFromLobby(lobbyId) {
     }
   });
 
-  if (lobby.gameType === "2v2") {
-    ["green", "red"].forEach((team) => {
-      const botId = `${team}-bot-${gameId}-1`;
+  // Fill remaining slots with bots for each team
+  const teamSize = PLAYERS_PER_TEAM[lobby.gameType] || 1;
+  ["green", "red"].forEach((team) => {
+    const humansOnTeam = Object.values(players).filter((p) => !p.isBot && p.team === team).length;
+    const botsNeeded = teamSize - humansOnTeam;
+    for (let i = 1; i <= botsNeeded; i++) {
+      const botId = `${team}-bot-${gameId}-${i}`;
       const pos = getSpawnPosition(team);
       players[botId] = {
         id: botId,
-        username: `${team === "green" ? "Green" : "Red"} Bot`,
+        username: `${team === "green" ? "Green" : "Red"} Bot ${botsNeeded > 1 ? i : ""}`.trim(),
         x: pos.x,
         y: pos.y,
         segments: [{ x: pos.x, y: pos.y }],
@@ -736,13 +788,14 @@ function startGameFromLobby(lobbyId) {
         isBot: true,
         team,
       };
-    });
-  }
+    }
+  });
 
+  const foodCount = lobby.gameType === "5v5" ? 150 : lobby.gameType === "2v2" ? 120 : 100;
   const gameState = {
     id: gameId,
     players,
-    food: generateFood(lobby.gameType === "2v2" ? 120 : 100),
+    food: generateFood(foodCount),
     startTime: Date.now(),
     botDifficulty: "medium",
     lobbyId,
@@ -770,9 +823,170 @@ function startGameFromLobby(lobbyId) {
   }, 5000);
 }
 
+function enterLobbyMatchmaking(lobbyId) {
+  const lobby = gameLobbies.get(lobbyId);
+  if (!lobby) return;
+
+  lobby.status = "matchmaking";
+
+  // Notify lobby players
+  lobby.players.forEach((p) => {
+    io.to(p.odrediserSocketId).emit("lobby-matchmaking-started", { lobbyId });
+  });
+
+  const gameMode = lobby.gameType;
+  const needed = REQUIRED_PLAYERS[gameMode] || 10;
+
+  if (!matchmakingQueues.has(gameMode)) {
+    matchmakingQueues.set(gameMode, []);
+  }
+  const queue = matchmakingQueues.get(gameMode);
+
+  // Add lobby players to the matchmaking queue, tagged with lobbyId
+  lobby.players.forEach((lobbyPlayer) => {
+    const playerSocket = io.sockets.sockets.get(lobbyPlayer.odrediserSocketId);
+    if (playerSocket && !queue.find((p) => p.socket.id === playerSocket.id)) {
+      queue.push({
+        socket: playerSocket,
+        playerData: { username: lobbyPlayer.odrediserId, betAmount: 0 },
+        lobbyId,
+        lobbyTeam: "green",
+      });
+    }
+  });
+
+  // Notify all in queue
+  queue.forEach((p) => {
+    p.socket.emit("queue-update", {
+      playersInQueue: queue.length,
+      playersNeeded: needed,
+    });
+  });
+
+  // Check if enough players to start
+  if (queue.length >= needed) {
+    const matchedPlayers = queue.splice(0, needed);
+    startOnlineGameWithLobby(gameMode, matchedPlayers);
+  }
+}
+
+function startOnlineGameWithLobby(gameMode, matchedPlayers) {
+  const gameId = `game-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const players = {};
+  const teamSize = matchedPlayers.length / 2;
+
+  const getSpawnPosition = (team) => {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 600 + Math.random() * 300;
+    const side = team === "green" ? -1 : 1;
+    return {
+      x: Math.cos(angle) * radius * side * 1.2,
+      y: Math.sin(angle) * radius,
+    };
+  };
+
+  // Lobby players go on green, others fill remaining green then red
+  const lobbyPlayers = matchedPlayers.filter((e) => e.lobbyId);
+  const soloPlayers = matchedPlayers.filter((e) => !e.lobbyId);
+
+  let greenCount = 0;
+
+  // Lobby players always on green
+  lobbyPlayers.forEach((entry) => {
+    const pos = getSpawnPosition("green");
+    players[entry.socket.id] = {
+      id: entry.socket.id,
+      username: entry.playerData.username || "Player",
+      x: pos.x,
+      y: pos.y,
+      segments: [{ x: pos.x, y: pos.y }],
+      direction: { x: 1, y: 0 },
+      score: 0,
+      color: "#00e701",
+      alive: true,
+      betAmount: entry.playerData.betAmount || 0,
+      isBot: false,
+      team: "green",
+    };
+    greenCount++;
+  });
+
+  // Solo players fill green first, then red
+  soloPlayers.forEach((entry) => {
+    const team = greenCount < teamSize ? "green" : "red";
+    const pos = getSpawnPosition(team);
+    players[entry.socket.id] = {
+      id: entry.socket.id,
+      username: entry.playerData.username || "Player",
+      x: pos.x,
+      y: pos.y,
+      segments: [{ x: pos.x, y: pos.y }],
+      direction: { x: team === "green" ? 1 : -1, y: 0 },
+      score: 0,
+      color: team === "green" ? "#00e701" : "#ff4444",
+      alive: true,
+      betAmount: entry.playerData.betAmount || 0,
+      isBot: false,
+      team,
+    };
+    if (team === "green") greenCount++;
+  });
+
+  const foodCount = gameMode === "1v1" ? 100 : gameMode === "2v2" ? 120 : 150;
+  const gameState = {
+    id: gameId,
+    players,
+    food: generateFood(foodCount),
+    startTime: Date.now(),
+    botDifficulty: "medium",
+    botPositionHistory: {},
+  };
+
+  activeGames.set(gameId, gameState);
+
+  matchedPlayers.forEach((entry) => {
+    entry.socket.join(gameId);
+    entry.socket.emit("match-found", {
+      gameId,
+      playerId: entry.socket.id,
+      gameState: serializeGameState(gameState),
+    });
+  });
+
+  // Clean up lobby references
+  const lobbyIds = new Set(lobbyPlayers.map((p) => p.lobbyId));
+  lobbyIds.forEach((lid) => {
+    const lobby = gameLobbies.get(lid);
+    if (lobby) {
+      lobby.players.forEach((p) => userLobbies.delete(p.odrediserId));
+      gameLobbies.delete(lid);
+    }
+  });
+}
+
 function leaveLobby(odrediserId, lobbyId) {
   const lobby = gameLobbies.get(lobbyId);
   if (!lobby) return;
+
+  // If in matchmaking, remove ALL lobby members from queue
+  if (lobby.status === "matchmaking") {
+    const queue = matchmakingQueues.get(lobby.gameType);
+    if (queue) {
+      for (let i = queue.length - 1; i >= 0; i--) {
+        if (queue[i].lobbyId === lobbyId) {
+          queue.splice(i, 1);
+        }
+      }
+      // Notify remaining queue
+      const needed = REQUIRED_PLAYERS[lobby.gameType] || 10;
+      queue.forEach((p) => {
+        p.socket.emit("queue-update", {
+          playersInQueue: queue.length,
+          playersNeeded: needed,
+        });
+      });
+    }
+  }
 
   const playerIndex = lobby.players.findIndex((p) => p.odrediserId === odrediserId);
   if (playerIndex === -1) return;
@@ -796,6 +1010,7 @@ function leaveLobby(odrediserId, lobbyId) {
       })),
       hostId: lobby.hostId,
       status: lobby.status,
+      fillMode: lobby.fillMode,
     };
     lobby.players.forEach((p) => {
       io.to(p.odrediserSocketId).emit("lobby-updated", lobbyData);

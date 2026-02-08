@@ -1,8 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-
 interface LobbyPlayer {
   odrediserId: string;
   ready: boolean;
@@ -14,6 +11,7 @@ interface LobbyData {
   players: LobbyPlayer[];
   hostId: string;
   status: string;
+  fillMode?: "bots" | "players";
 }
 
 interface GameLobbyProps {
@@ -22,12 +20,23 @@ interface GameLobbyProps {
   onReady: () => void;
   onLeave: () => void;
   countdown: number | null;
+  isHost: boolean;
+  onSetFillMode: (mode: "bots" | "players") => void;
 }
 
-export default function GameLobby({ lobby, odrediserId, onReady, onLeave, countdown }: GameLobbyProps) {
-  const router = useRouter();
+const TEAM_SIZES: Record<string, number> = { "1v1": 1, "2v2": 2, "5v5": 5 };
+
+export default function GameLobby({ lobby, odrediserId, onReady, onLeave, countdown, isHost, onSetFillMode }: GameLobbyProps) {
   const currentPlayer = lobby.players.find(p => p.odrediserId === odrediserId);
   const isReady = currentPlayer?.ready || false;
+  const fillMode = lobby.fillMode || "bots";
+  const teamSize = TEAM_SIZES[lobby.gameType] || 1;
+  const isTeamMode = lobby.gameType !== "1v1";
+
+  // Calculate bot/waiting slots
+  const greenHumans = isTeamMode ? lobby.players.length : 1;
+  const greenSlotsNeeded = isTeamMode ? teamSize - greenHumans : 0;
+  const redSlotsNeeded = isTeamMode ? teamSize : 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-80">
@@ -35,72 +44,139 @@ export default function GameLobby({ lobby, odrediserId, onReady, onLeave, countd
         {/* Header */}
         <div className="text-center mb-6">
           <h2 className="text-3xl font-black text-white mb-2">
-            {lobby.gameType === "1v1" ? "1v1" : "2v2"} Game Lobby
+            {lobby.gameType} Game Lobby
           </h2>
           <p className="text-gray-400">
-            {countdown !== null
-              ? `Starting in ${countdown}...`
-              : "Waiting for players to ready up"}
+            {lobby.status === "matchmaking"
+              ? "Searching for online players..."
+              : countdown !== null
+                ? `Starting in ${countdown}...`
+                : "Waiting for players to ready up"}
           </p>
         </div>
 
-        {/* Players */}
-        <div className="space-y-3 mb-6">
-          {lobby.players.map((player, index) => (
-            <div
-              key={player.odrediserId}
-              className={`p-4 rounded-lg flex items-center justify-between ${
-                player.ready ? "bg-green-900/30 border-green-500" : "bg-[#0f212e]"
-              } border-2 ${player.ready ? "border-green-500" : "border-gray-700"}`}
-            >
+        {/* Green Team */}
+        <div className="space-y-3 mb-4">
+          {isTeamMode && (
+            <p className="text-sm font-bold text-[#00e701] uppercase tracking-wide">Green Team</p>
+          )}
+
+          {/* Human players */}
+          {lobby.players.map((player, index) => {
+            const team = isTeamMode ? "green" : (index === 0 ? "green" : "red");
+            return (
+              <div
+                key={player.odrediserId}
+                className={`p-4 rounded-lg flex items-center justify-between ${
+                  player.ready ? "bg-green-900/30 border-green-500" : "bg-[#0f212e]"
+                } border-2 ${player.ready ? "border-green-500" : "border-gray-700"}`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`w-4 h-4 rounded-full ${
+                    team === "green" ? "bg-[#00e701]" : "bg-[#ff4444]"
+                  }`} />
+                  <span className="font-bold text-white">
+                    {player.odrediserId === odrediserId ? "You" : `Player ${index + 1}`}
+                    {player.odrediserId === lobby.hostId && (
+                      <span className="ml-2 text-yellow-400 text-sm">(Host)</span>
+                    )}
+                  </span>
+                </div>
+                <div className={`px-3 py-1 rounded text-sm font-bold ${
+                  player.ready
+                    ? "bg-green-500 text-black"
+                    : "bg-gray-600 text-gray-300"
+                }`}>
+                  {player.ready ? "READY" : "NOT READY"}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Green team bot/waiting slots */}
+          {Array.from({ length: greenSlotsNeeded }).map((_, i) => (
+            <div key={`green-slot-${i}`} className="p-4 rounded-lg flex items-center justify-between bg-[#0f212e] border-2 border-gray-700 opacity-60">
               <div className="flex items-center gap-3">
-                <div className={`w-4 h-4 rounded-full ${
-                  index === 0 ? "bg-[#00e701]" : "bg-[#ff4444]"
-                }`} />
+                <div className="w-4 h-4 rounded-full bg-[#00e701]" />
                 <span className="font-bold text-white">
-                  {player.odrediserId === odrediserId ? "You" : `Player ${index + 1}`}
-                  {player.odrediserId === lobby.hostId && (
-                    <span className="ml-2 text-yellow-400 text-sm">(Host)</span>
-                  )}
+                  {fillMode === "bots" ? `Green Bot ${greenSlotsNeeded > 1 ? i + 1 : ""}`.trim() : "Waiting for player..."}
                 </span>
               </div>
               <div className={`px-3 py-1 rounded text-sm font-bold ${
-                player.ready
-                  ? "bg-green-500 text-black"
-                  : "bg-gray-600 text-gray-300"
+                fillMode === "bots" ? "bg-blue-500 text-white" : "bg-gray-600 text-gray-300"
               }`}>
-                {player.ready ? "READY" : "NOT READY"}
+                {fillMode === "bots" ? "BOT" : "..."}
               </div>
             </div>
           ))}
-
-          {/* Bot slots for 2v2 */}
-          {lobby.gameType === "2v2" && (
-            <>
-              <div className="p-4 rounded-lg flex items-center justify-between bg-[#0f212e] border-2 border-gray-700 opacity-60">
-                <div className="flex items-center gap-3">
-                  <div className="w-4 h-4 rounded-full bg-[#00e701]" />
-                  <span className="font-bold text-white">Green Bot</span>
-                </div>
-                <div className="px-3 py-1 rounded text-sm font-bold bg-blue-500 text-white">
-                  BOT
-                </div>
-              </div>
-              <div className="p-4 rounded-lg flex items-center justify-between bg-[#0f212e] border-2 border-gray-700 opacity-60">
-                <div className="flex items-center gap-3">
-                  <div className="w-4 h-4 rounded-full bg-[#ff4444]" />
-                  <span className="font-bold text-white">Red Bot</span>
-                </div>
-                <div className="px-3 py-1 rounded text-sm font-bold bg-blue-500 text-white">
-                  BOT
-                </div>
-              </div>
-            </>
-          )}
         </div>
 
+        {/* Red Team */}
+        {isTeamMode && redSlotsNeeded > 0 && (
+          <div className="space-y-3 mb-6">
+            <p className="text-sm font-bold text-[#ff4444] uppercase tracking-wide">Red Team</p>
+            {Array.from({ length: redSlotsNeeded }).map((_, i) => (
+              <div key={`red-slot-${i}`} className="p-4 rounded-lg flex items-center justify-between bg-[#0f212e] border-2 border-gray-700 opacity-60">
+                <div className="flex items-center gap-3">
+                  <div className="w-4 h-4 rounded-full bg-[#ff4444]" />
+                  <span className="font-bold text-white">
+                    {fillMode === "bots" ? `Red Bot ${redSlotsNeeded > 1 ? i + 1 : ""}`.trim() : "Waiting for player..."}
+                  </span>
+                </div>
+                <div className={`px-3 py-1 rounded text-sm font-bold ${
+                  fillMode === "bots" ? "bg-blue-500 text-white" : "bg-gray-600 text-gray-300"
+                }`}>
+                  {fillMode === "bots" ? "BOT" : "..."}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Fill Mode Selector (host only, team modes only, waiting status only) */}
+        {isHost && isTeamMode && lobby.status === "waiting" && (
+          <div className="mb-4">
+            <p className="text-gray-400 text-sm mb-2">Fill remaining slots with:</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => onSetFillMode("bots")}
+                className={`py-2 px-3 rounded-lg font-bold text-sm transition-all ${
+                  fillMode === "bots"
+                    ? "bg-blue-500 text-white border-2 border-blue-400"
+                    : "bg-[#0f212e] text-gray-400 border-2 border-gray-700 hover:border-gray-500"
+                }`}
+              >
+                Bots (instant)
+              </button>
+              <button
+                onClick={() => onSetFillMode("players")}
+                className={`py-2 px-3 rounded-lg font-bold text-sm transition-all ${
+                  fillMode === "players"
+                    ? "bg-purple-500 text-white border-2 border-purple-400"
+                    : "bg-[#0f212e] text-gray-400 border-2 border-gray-700 hover:border-gray-500"
+                }`}
+              >
+                Online Players
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Actions */}
-        {countdown === null ? (
+        {lobby.status === "matchmaking" ? (
+          <div className="text-center space-y-3">
+            <div className="text-2xl animate-pulse text-purple-400 font-bold">
+              Searching for players...
+            </div>
+            <p className="text-gray-400 text-sm">Waiting for online opponents to join</p>
+            <button
+              onClick={onLeave}
+              className="w-full font-bold py-3 px-6 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-all"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : countdown === null ? (
           <div className="space-y-3">
             <button
               onClick={onReady}
