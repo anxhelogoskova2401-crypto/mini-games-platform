@@ -115,6 +115,7 @@ io.on("connection", (socket) => {
       ],
       status: "waiting",
       fillMode: "bots",
+      botDifficulty: "medium",
     };
 
     gameLobbies.set(lobbyId, lobby);
@@ -131,6 +132,7 @@ io.on("connection", (socket) => {
       hostId: invite.senderId,
       status: lobby.status,
       fillMode: lobby.fillMode,
+      botDifficulty: lobby.botDifficulty,
     };
 
     io.to(senderSocketId).emit("lobby-created", lobbyData);
@@ -172,6 +174,33 @@ io.on("connection", (socket) => {
       hostId: lobby.hostId,
       status: lobby.status,
       fillMode: lobby.fillMode,
+      botDifficulty: lobby.botDifficulty,
+    };
+    lobby.players.forEach((p) => {
+      io.to(p.odrediserSocketId).emit("lobby-updated", lobbyData);
+    });
+  });
+
+  // Host sets bot difficulty
+  socket.on("lobby-set-bot-difficulty", (data) => {
+    const { lobbyId, botDifficulty } = data;
+    const userId = onlineUsers.get(socket.id);
+    const lobby = gameLobbies.get(lobbyId);
+    if (!lobby || lobby.hostId !== userId) return;
+    if (!["easy", "medium", "hard"].includes(botDifficulty)) return;
+    lobby.botDifficulty = botDifficulty;
+
+    const lobbyData = {
+      lobbyId,
+      gameType: lobby.gameType,
+      players: lobby.players.map((p) => ({
+        odrediserId: p.odrediserId,
+        ready: p.ready,
+      })),
+      hostId: lobby.hostId,
+      status: lobby.status,
+      fillMode: lobby.fillMode,
+      botDifficulty: lobby.botDifficulty,
     };
     lobby.players.forEach((p) => {
       io.to(p.odrediserSocketId).emit("lobby-updated", lobbyData);
@@ -206,6 +235,7 @@ io.on("connection", (socket) => {
       hostId: lobby.hostId,
       status: lobby.status,
       fillMode: lobby.fillMode,
+      botDifficulty: lobby.botDifficulty,
     };
 
     lobby.players.forEach((p) => {
@@ -797,7 +827,7 @@ function startGameFromLobby(lobbyId) {
     players,
     food: generateFood(foodCount),
     startTime: Date.now(),
-    botDifficulty: "medium",
+    botDifficulty: lobby.botDifficulty || "medium",
     lobbyId,
     gracePeriodEnd: Date.now() + 3000,
     expectedHumans: lobby.players.length,
@@ -1011,6 +1041,7 @@ function leaveLobby(odrediserId, lobbyId) {
       hostId: lobby.hostId,
       status: lobby.status,
       fillMode: lobby.fillMode,
+      botDifficulty: lobby.botDifficulty,
     };
     lobby.players.forEach((p) => {
       io.to(p.odrediserSocketId).emit("lobby-updated", lobbyData);

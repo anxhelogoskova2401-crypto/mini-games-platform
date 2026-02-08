@@ -717,42 +717,44 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
               </div>
             </div>
 
-            {/* Bot Difficulty Selector */}
-            <div className="mb-6">
-              <label className="block text-gray-400 mb-2 text-sm">Bot Difficulty:</label>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  onClick={() => setBotDifficulty("easy")}
-                  className={`py-3 px-4 rounded-lg font-bold transition-all ${
-                    botDifficulty === "easy"
-                      ? "bg-[#00e701] text-black"
-                      : "bg-[#0f212e] text-gray-400 hover:bg-[#213743]"
-                  }`}
-                >
-                  Easy
-                </button>
-                <button
-                  onClick={() => setBotDifficulty("medium")}
-                  className={`py-3 px-4 rounded-lg font-bold transition-all ${
-                    botDifficulty === "medium"
-                      ? "bg-[#00e701] text-black"
-                      : "bg-[#0f212e] text-gray-400 hover:bg-[#213743]"
-                  }`}
-                >
-                  Medium
-                </button>
-                <button
-                  onClick={() => setBotDifficulty("hard")}
-                  className={`py-3 px-4 rounded-lg font-bold transition-all ${
-                    botDifficulty === "hard"
-                      ? "bg-[#00e701] text-black"
-                      : "bg-[#0f212e] text-gray-400 hover:bg-[#213743]"
-                  }`}
-                >
-                  Hard
-                </button>
+            {/* Bot Difficulty Selector (offline only) */}
+            {playMode === "offline" && (
+              <div className="mb-6">
+                <label className="block text-gray-400 mb-2 text-sm">Bot Difficulty:</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={() => setBotDifficulty("easy")}
+                    className={`py-3 px-4 rounded-lg font-bold transition-all ${
+                      botDifficulty === "easy"
+                        ? "bg-[#00e701] text-black"
+                        : "bg-[#0f212e] text-gray-400 hover:bg-[#213743]"
+                    }`}
+                  >
+                    Easy
+                  </button>
+                  <button
+                    onClick={() => setBotDifficulty("medium")}
+                    className={`py-3 px-4 rounded-lg font-bold transition-all ${
+                      botDifficulty === "medium"
+                        ? "bg-[#00e701] text-black"
+                        : "bg-[#0f212e] text-gray-400 hover:bg-[#213743]"
+                    }`}
+                  >
+                    Medium
+                  </button>
+                  <button
+                    onClick={() => setBotDifficulty("hard")}
+                    className={`py-3 px-4 rounded-lg font-bold transition-all ${
+                      botDifficulty === "hard"
+                        ? "bg-[#00e701] text-black"
+                        : "bg-[#0f212e] text-gray-400 hover:bg-[#213743]"
+                    }`}
+                  >
+                    Hard
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             {playMode === "online" && (
               <div className="bg-[#0f212e] p-4 rounded-lg mb-6">

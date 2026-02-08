@@ -12,6 +12,7 @@ interface LobbyData {
   hostId: string;
   status: string;
   fillMode?: "bots" | "players";
+  botDifficulty?: "easy" | "medium" | "hard";
 }
 
 interface GameLobbyProps {
@@ -22,14 +23,16 @@ interface GameLobbyProps {
   countdown: number | null;
   isHost: boolean;
   onSetFillMode: (mode: "bots" | "players") => void;
+  onSetBotDifficulty: (difficulty: "easy" | "medium" | "hard") => void;
 }
 
 const TEAM_SIZES: Record<string, number> = { "1v1": 1, "2v2": 2, "5v5": 5 };
 
-export default function GameLobby({ lobby, odrediserId, onReady, onLeave, countdown, isHost, onSetFillMode }: GameLobbyProps) {
+export default function GameLobby({ lobby, odrediserId, onReady, onLeave, countdown, isHost, onSetFillMode, onSetBotDifficulty }: GameLobbyProps) {
   const currentPlayer = lobby.players.find(p => p.odrediserId === odrediserId);
   const isReady = currentPlayer?.ready || false;
   const fillMode = lobby.fillMode || "bots";
+  const botDifficulty = lobby.botDifficulty || "medium";
   const teamSize = TEAM_SIZES[lobby.gameType] || 1;
   const isTeamMode = lobby.gameType !== "1v1";
 
@@ -157,6 +160,45 @@ export default function GameLobby({ lobby, odrediserId, onReady, onLeave, countd
                 }`}
               >
                 Online Players
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Bot Difficulty Selector (host only, bots mode, waiting status only) */}
+        {isHost && fillMode === "bots" && lobby.status === "waiting" && (
+          <div className="mb-4">
+            <p className="text-gray-400 text-sm mb-2">Bot Difficulty:</p>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                onClick={() => onSetBotDifficulty("easy")}
+                className={`py-2 px-3 rounded-lg font-bold text-sm transition-all ${
+                  botDifficulty === "easy"
+                    ? "bg-green-500 text-black border-2 border-green-400"
+                    : "bg-[#0f212e] text-gray-400 border-2 border-gray-700 hover:border-gray-500"
+                }`}
+              >
+                Easy
+              </button>
+              <button
+                onClick={() => onSetBotDifficulty("medium")}
+                className={`py-2 px-3 rounded-lg font-bold text-sm transition-all ${
+                  botDifficulty === "medium"
+                    ? "bg-yellow-500 text-black border-2 border-yellow-400"
+                    : "bg-[#0f212e] text-gray-400 border-2 border-gray-700 hover:border-gray-500"
+                }`}
+              >
+                Medium
+              </button>
+              <button
+                onClick={() => onSetBotDifficulty("hard")}
+                className={`py-2 px-3 rounded-lg font-bold text-sm transition-all ${
+                  botDifficulty === "hard"
+                    ? "bg-red-500 text-white border-2 border-red-400"
+                    : "bg-[#0f212e] text-gray-400 border-2 border-gray-700 hover:border-gray-500"
+                }`}
+              >
+                Hard
               </button>
             </div>
           </div>

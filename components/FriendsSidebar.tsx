@@ -45,6 +45,7 @@ interface LobbyData {
   hostId: string;
   status: string;
   fillMode?: "bots" | "players";
+  botDifficulty?: "easy" | "medium" | "hard";
 }
 
 interface FriendsSidebarProps {
@@ -320,6 +321,15 @@ export default function FriendsSidebar({ userId }: FriendsSidebarProps) {
     }
   };
 
+  const setBotDifficulty = (difficulty: "easy" | "medium" | "hard") => {
+    if (socketRef && currentLobby) {
+      socketRef.emit("lobby-set-bot-difficulty", {
+        lobbyId: currentLobby.lobbyId,
+        botDifficulty: difficulty,
+      });
+    }
+  };
+
   const acceptInvite = () => {
     if (socketRef && pendingInvite) {
       socketRef.emit("accept-invite", { inviteId: pendingInvite.inviteId });
@@ -365,6 +375,7 @@ export default function FriendsSidebar({ userId }: FriendsSidebarProps) {
           countdown={lobbyCountdown}
           isHost={currentLobby.hostId === userId}
           onSetFillMode={setFillMode}
+          onSetBotDifficulty={setBotDifficulty}
         />
         <div className="w-80 border-l p-6 flex flex-col" style={{
           background: 'var(--bg-elevated)',
