@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import nodemailer from "nodemailer";
 import { prisma } from "@/lib/prisma";
-import { Resend } from "resend";
 
 const STARTING_COINS = 100;
 
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Send verification email
+    // Send verification email via Gmail SMTP
     const baseUrl = process.env.NEXTAUTH_URL || (process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
       : "http://localhost:3000");
@@ -70,9 +70,16 @@ export async function POST(req: NextRequest) {
     let emailSent = false;
     let emailError = null;
     try {
-      const resend = new Resend(process.env.RESEND_API_KEY);
-      const result = await resend.emails.send({
-        from: process.env.EMAIL_FROM || "MiniGames <onboarding@resend.dev>",
+      const transporter = nodemailer.createTransport({
+        service: "gmail",
+        auth: {
+          user: process.env.GMAIL_USER,
+          pass: process.env.GMAIL_APP_PASSWORD,
+        },
+      });
+
+      await transporter.sendMail({
+        from: `"MiniGames" <${process.env.GMAIL_USER}>`,
         to: email,
         subject: "Verify your MiniGames account",
         html: `
@@ -89,12 +96,7 @@ export async function POST(req: NextRequest) {
           </div>
         `,
       });
-      if (result.error) {
-        console.error("Resend error:", result.error);
-        emailError = result.error.message;
-      } else {
-        emailSent = true;
-      }
+      emailSent = true;
     } catch (err: any) {
       console.error("Failed to send verification email:", err);
       emailError = err.message || "Unknown email error";
