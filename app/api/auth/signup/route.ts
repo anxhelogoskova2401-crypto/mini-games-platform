@@ -67,9 +67,11 @@ export async function POST(req: NextRequest) {
       : "http://localhost:3000");
     const verifyUrl = `${baseUrl}/api/auth/verify?token=${verificationToken}`;
 
+    let emailSent = false;
+    let emailError = null;
     try {
       const resend = new Resend(process.env.RESEND_API_KEY);
-      await resend.emails.send({
+      const result = await resend.emails.send({
         from: process.env.EMAIL_FROM || "MiniGames <onboarding@resend.dev>",
         to: email,
         subject: "Verify your MiniGames account",
@@ -87,13 +89,23 @@ export async function POST(req: NextRequest) {
           </div>
         `,
       });
-    } catch (emailError) {
-      console.error("Failed to send verification email:", emailError);
+      if (result.error) {
+        console.error("Resend error:", result.error);
+        emailError = result.error.message;
+      } else {
+        emailSent = true;
+      }
+    } catch (err: any) {
+      console.error("Failed to send verification email:", err);
+      emailError = err.message || "Unknown email error";
     }
 
     return NextResponse.json(
       {
-        message: "User created successfully. Please check your email to verify your account.",
+        message: emailSent
+          ? "Account created! Please check your email to verify."
+          : `Account created but verification email failed: ${emailError}. Contact support.`,
+        emailSent,
         user: {
           id: user.id,
           email: user.email,

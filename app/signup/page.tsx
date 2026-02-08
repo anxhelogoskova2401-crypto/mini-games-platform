@@ -29,6 +29,8 @@ export default function SignupPage() {
 
       if (!response.ok) {
         setError(data.error || "Signup failed");
+      } else if (!data.emailSent) {
+        setError(data.message || "Account created but email failed to send.");
       } else {
         setSignedUp(true);
       }
