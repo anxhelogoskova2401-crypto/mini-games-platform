@@ -25,6 +25,7 @@ interface Player {
   alive: boolean;
   team: "green" | "red";
   isBot: boolean;
+  ping?: number;
 }
 
 interface GameState {
@@ -32,6 +33,9 @@ interface GameState {
   players: Player[];
   food: { x: number; y: number; id: string }[];
   startTime: number;
+  gracePeriodRemaining?: number;
+  connectedHumans?: number;
+  expectedHumans?: number;
 }
 
 export default function SlitherMultiplayerGame({ user }: { user: User }) {
@@ -72,6 +76,9 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
   } | null>(null);
   const [socketConnected, setSocketConnected] = useState(false);
   const [queueInfo, setQueueInfo] = useState<{ playersInQueue: number; playersNeeded: number } | null>(null);
+  const [myPing, setMyPing] = useState(0);
+  const [graceCountdown, setGraceCountdown] = useState<number | null>(null);
+  const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const router = useRouter();
 
@@ -119,6 +126,11 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
 
     // Connect to Socket.io
     socketRef.current = getSocket();
+
+    // Check if already connected (important for lobby game navigation)
+    if (socketRef.current.connected) {
+      setSocketConnected(true);
+    }
 
     socketRef.current.on("connect", () => {
       setSocketConnected(true);
@@ -198,11 +210,30 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
       setJoiningFromLobby(false);
       setPlayerDead(false);
       setSpectating(false);
-      // Set player's team for correct win/lose display
       const myPlayer = data.gameState.players.find(p => p.id === data.playerId);
       if (myPlayer) {
         setPlayerTeam(myPlayer.team === "green" ? "Green Team" : "Red Team");
       }
+    });
+
+    // Grace period: all players connected, start 5s countdown
+    socketRef.current.on("game-all-connected", (data: { countdownSeconds: number }) => {
+      setGraceCountdown(data.countdownSeconds);
+      let count = data.countdownSeconds;
+      const interval = setInterval(() => {
+        count--;
+        setGraceCountdown(count);
+        if (count <= 0) {
+          clearInterval(interval);
+          setGraceCountdown(null);
+        }
+      }, 1000);
+    });
+
+    // Ping measurement response
+    socketRef.current.on("pong-check", (data: { timestamp: number }) => {
+      const ping = Date.now() - data.timestamp;
+      setMyPing(ping);
     });
 
     return () => {
@@ -215,9 +246,14 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
         socketRef.current.off("game-update");
         socketRef.current.off("player-disconnected");
         socketRef.current.off("lobby-game-joined");
+        socketRef.current.off("game-all-connected");
+        socketRef.current.off("pong-check");
       }
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+      }
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
       }
     };
   }, []);
@@ -237,6 +273,22 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
       });
     }
   }, [lobbyGameData, socketConnected, user.id]);
+
+  // Ping measurement interval
+  useEffect(() => {
+    if (gameState && socketRef.current) {
+      pingIntervalRef.current = setInterval(() => {
+        socketRef.current?.emit("ping-check", { timestamp: Date.now(), ping: myPing });
+      }, 2000);
+
+      return () => {
+        if (pingIntervalRef.current) {
+          clearInterval(pingIntervalRef.current);
+          pingIntervalRef.current = null;
+        }
+      };
+    }
+  }, [!!gameState]);
 
   // Attach mousemove listener
   useEffect(() => {
@@ -546,7 +598,7 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
 
     // Draw leaderboard
     if (showLeaderboard) {
-      const leaderboardWidth = 250;
+      const leaderboardWidth = 300;
       const leaderboardX = 20;
       const leaderboardY = 80;
 
@@ -571,11 +623,33 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
         ctx.font = isCurrentPlayer ? "bold 16px Arial" : "14px Arial";
         ctx.fillText(`${index + 1}. ${p.username}`, leaderboardX + 10, y);
 
+        // Show ping for non-bot players
+        if (!p.isBot && p.ping !== undefined) {
+          const pingColor = p.ping < 80 ? "#00e701" : p.ping < 150 ? "#FFD700" : "#ff4444";
+          ctx.fillStyle = pingColor;
+          ctx.font = "12px Arial";
+          ctx.textAlign = "right";
+          ctx.fillText(`${p.ping}ms`, leaderboardX + leaderboardWidth - 60, y);
+        }
+
         ctx.fillStyle = "white";
+        ctx.font = "14px Arial";
         ctx.textAlign = "right";
         ctx.fillText(`${p.score}`, leaderboardX + leaderboardWidth - 10, y);
         ctx.textAlign = "left";
       });
+    }
+
+    // Draw own ping indicator (top right)
+    if (myPing > 0) {
+      const pingColor = myPing < 80 ? "#00e701" : myPing < 150 ? "#FFD700" : "#ff4444";
+      ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+      ctx.fillRect(canvasWidth - 110, 10, 100, 30);
+      ctx.fillStyle = pingColor;
+      ctx.font = "bold 14px Arial";
+      ctx.textAlign = "right";
+      ctx.fillText(`PING: ${myPing}ms`, canvasWidth - 15, 30);
+      ctx.textAlign = "left";
     }
 
     // Draw minimap
@@ -867,6 +941,35 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
               height={canvasHeight}
               className="w-full h-full game-cursor"
             />
+
+            {/* Grace Period Countdown Overlay */}
+            {(graceCountdown !== null && graceCountdown > 0) && (
+              <div className="fixed inset-0 flex items-center justify-center z-[90] pointer-events-none">
+                <div className="bg-black bg-opacity-60 p-10 rounded-2xl text-center">
+                  <p className="text-gray-300 text-lg mb-2">All players connected!</p>
+                  <div className="text-8xl font-black text-[#00e701] animate-pulse mb-4">
+                    {graceCountdown}
+                  </div>
+                  <p className="text-gray-400 text-sm">Game starting...</p>
+                </div>
+              </div>
+            )}
+
+            {/* Waiting for Players Overlay */}
+            {gameState.expectedHumans && gameState.connectedHumans !== undefined &&
+              gameState.connectedHumans < gameState.expectedHumans && (
+              <div className="fixed inset-0 flex items-center justify-center z-[90] pointer-events-none">
+                <div className="bg-black bg-opacity-60 p-10 rounded-2xl text-center">
+                  <div className="animate-pulse text-4xl mb-4">🔗</div>
+                  <p className="text-white text-xl font-bold mb-2">
+                    Waiting for players...
+                  </p>
+                  <p className="text-gray-300 text-lg">
+                    {gameState.connectedHumans} / {gameState.expectedHumans} connected
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Death UI */}
             {playerDead && !spectating && (

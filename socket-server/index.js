@@ -302,8 +302,35 @@ io.on("connection", (socket) => {
         playerId: socket.id,
         gameState: serializeGameState(game),
       });
+
+      // Broadcast connection status to all players in the game
+      io.to(gameId).emit("game-connection-status", {
+        connectedHumans: game.connectedHumans,
+        expectedHumans: game.expectedHumans || 0,
+      });
+
+      // If all humans connected, reset grace period to 5s from now
+      if (game.expectedHumans && game.connectedHumans >= game.expectedHumans) {
+        game.gracePeriodEnd = Date.now() + 5000;
+        io.to(gameId).emit("game-all-connected", { countdownSeconds: 5 });
+      }
     } else {
       socket.emit("error", { message: "Player not found in game" });
+    }
+  });
+
+  // Ping measurement
+  socket.on("ping-check", (data) => {
+    socket.emit("pong-check", { timestamp: data.timestamp });
+
+    // Store ping for game state
+    if (data.ping !== undefined) {
+      activeGames.forEach((game) => {
+        if (game.players[socket.id]) {
+          if (!game.playerPings) game.playerPings = {};
+          game.playerPings[socket.id] = data.ping;
+        }
+      });
     }
   });
 
@@ -829,9 +856,10 @@ function startGameFromLobby(lobbyId) {
     startTime: Date.now(),
     botDifficulty: lobby.botDifficulty || "medium",
     lobbyId,
-    gracePeriodEnd: Date.now() + 3000,
+    gracePeriodEnd: Date.now() + 5000,
     expectedHumans: lobby.players.length,
     connectedHumans: 0,
+    playerPings: {},
   };
 
   activeGames.set(gameId, gameState);
@@ -1387,6 +1415,7 @@ function updateGame(game) {
 function serializeGameState(game) {
   const now = Date.now();
   const gracePeriodRemaining = game.gracePeriodEnd ? Math.max(0, Math.ceil((game.gracePeriodEnd - now) / 1000)) : 0;
+  const pings = game.playerPings || {};
 
   return {
     id: game.id,
@@ -1402,10 +1431,13 @@ function serializeGameState(game) {
       alive: p.alive,
       team: p.team,
       isBot: p.isBot,
+      ping: pings[p.id] || 0,
     })),
     food: game.food,
     startTime: game.startTime,
     gracePeriodRemaining,
+    connectedHumans: game.connectedHumans || 0,
+    expectedHumans: game.expectedHumans || 0,
   };
 }
 
