@@ -822,12 +822,14 @@ function startGameFromLobby(lobbyId) {
   };
 
   // Assign human players: 1v1 = opponents, 2v2/5v5 = both on green (teammates)
+  // NOTE: Do NOT join sockets to the game room here. Sockets join via
+  // join-lobby-game after the client navigates to the game page. This
+  // prevents game-update events from flooding the client before it's ready.
   lobby.players.forEach((lobbyPlayer, index) => {
     const team = lobby.gameType === "1v1"
       ? (index === 0 ? "green" : "red")
       : "green";
     const pos = getSpawnPosition(team);
-    const odrediserSocket = io.sockets.sockets.get(lobbyPlayer.odrediserSocketId);
 
     players[lobbyPlayer.odrediserSocketId] = {
       id: lobbyPlayer.odrediserSocketId,
@@ -844,10 +846,6 @@ function startGameFromLobby(lobbyId) {
       isBot: false,
       team,
     };
-
-    if (odrediserSocket) {
-      odrediserSocket.join(gameId);
-    }
   });
 
   // Fill remaining slots with bots for each team
@@ -1110,6 +1108,10 @@ function leaveLobby(odrediserId, lobbyId) {
 
 setInterval(() => {
   activeGames.forEach((game, gameId) => {
+    // Skip games where no humans have connected yet (lobby games waiting for join)
+    if (game.expectedHumans && (!game.connectedHumans || game.connectedHumans === 0)) {
+      return;
+    }
     updateGame(game);
     io.to(gameId).emit("game-update", serializeGameState(game));
   });
