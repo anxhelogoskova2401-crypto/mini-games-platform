@@ -74,48 +74,50 @@ export default function FriendsSidebar({ userId }: FriendsSidebarProps) {
   useEffect(() => {
     const socket = getSocket();
 
-    socket.on("connect", () => {
+    const handleConnect = () => {
       socket.emit("user-online", { userId });
-    });
+    };
 
-    socket.on("online-users", (users: string[]) => {
+    // Emit user-online immediately if already connected
+    if (socket.connected) {
+      socket.emit("user-online", { userId });
+    }
+
+    const handleOnlineUsers = (users: string[]) => {
       setOnlineUsers(new Set(users));
-    });
+    };
 
-    socket.on("user-status-changed", ({ userId, online }: { userId: string; online: boolean }) => {
+    const handleUserStatusChanged = ({ userId: uid, online }: { userId: string; online: boolean }) => {
       setOnlineUsers((prev) => {
         const newSet = new Set(prev);
         if (online) {
-          newSet.add(userId);
+          newSet.add(uid);
         } else {
-          newSet.delete(userId);
+          newSet.delete(uid);
         }
         return newSet;
       });
-    });
+    };
 
-    socket.on("game-invite-received", (data: { inviteId: string; senderId: string; gameType: string }) => {
+    const handleGameInviteReceived = (data: { inviteId: string; senderId: string; gameType: string }) => {
       setPendingInvite(data);
-    });
+    };
 
-    socket.on("invite-rejected", () => {
+    const handleInviteRejected = () => {
       alert("Your friend rejected the invitation");
-    });
+    };
 
-    // Lobby events
-    socket.on("lobby-created", (data: LobbyData) => {
+    const handleLobbyCreated = (data: LobbyData) => {
       setCurrentLobby(data);
       setLobbyCountdown(null);
-    });
+    };
 
-    socket.on("lobby-updated", (data: LobbyData) => {
+    const handleLobbyUpdated = (data: LobbyData) => {
       setCurrentLobby(data);
-    });
+    };
 
-    socket.on("lobby-countdown", (data: { lobbyId: string; seconds: number }) => {
+    const handleLobbyCountdown = (data: { lobbyId: string; seconds: number }) => {
       setLobbyCountdown(data.seconds);
-
-      // Countdown timer
       let count = data.seconds;
       const interval = setInterval(() => {
         count--;
@@ -124,51 +126,61 @@ export default function FriendsSidebar({ userId }: FriendsSidebarProps) {
           clearInterval(interval);
         }
       }, 1000);
-    });
+    };
 
-    socket.on("lobby-game-start", (data: { lobbyId: string; gameId: string; playerId: string; gameType: string }) => {
-      // Store game info in sessionStorage for the game page to pick up
+    const handleLobbyGameStart = (data: { lobbyId: string; gameId: string; playerId: string; gameType: string }) => {
       sessionStorage.setItem("lobbyGameData", JSON.stringify(data));
-      // Navigate to the game
       router.push("/games/slither-battle?fromLobby=true");
-    });
+    };
 
-    socket.on("lobby-closed", (data: { lobbyId: string; reason: string }) => {
+    const handleLobbyClosed = (data: { lobbyId: string; reason: string }) => {
       setCurrentLobby(null);
       setLobbyCountdown(null);
       alert(`Lobby closed: ${data.reason}`);
-    });
+    };
 
-    socket.on("lobby-matchmaking-started", () => {
+    const handleLobbyMatchmakingStarted = () => {
       setCurrentLobby((prev) => prev ? { ...prev, status: "matchmaking" } : null);
-    });
+    };
 
-    // When lobby matchmaking finds a game (players fill mode)
-    socket.on("match-found", (data: { gameId: string; playerId: string }) => {
+    const handleMatchFound = (data: { gameId: string; playerId: string }) => {
       sessionStorage.setItem("lobbyGameData", JSON.stringify({
         gameId: data.gameId,
         playerId: data.playerId,
-        gameType: currentLobby?.gameType || "5v5",
+        gameType: "5v5",
       }));
       setCurrentLobby(null);
       router.push("/games/slither-battle?fromLobby=true");
-    });
+    };
+
+    socket.on("connect", handleConnect);
+    socket.on("online-users", handleOnlineUsers);
+    socket.on("user-status-changed", handleUserStatusChanged);
+    socket.on("game-invite-received", handleGameInviteReceived);
+    socket.on("invite-rejected", handleInviteRejected);
+    socket.on("lobby-created", handleLobbyCreated);
+    socket.on("lobby-updated", handleLobbyUpdated);
+    socket.on("lobby-countdown", handleLobbyCountdown);
+    socket.on("lobby-game-start", handleLobbyGameStart);
+    socket.on("lobby-closed", handleLobbyClosed);
+    socket.on("lobby-matchmaking-started", handleLobbyMatchmakingStarted);
+    socket.on("match-found", handleMatchFound);
 
     setSocketRef(socket);
 
     return () => {
-      socket.off("connect");
-      socket.off("online-users");
-      socket.off("user-status-changed");
-      socket.off("game-invite-received");
-      socket.off("invite-rejected");
-      socket.off("lobby-created");
-      socket.off("lobby-updated");
-      socket.off("lobby-countdown");
-      socket.off("lobby-game-start");
-      socket.off("lobby-closed");
-      socket.off("lobby-matchmaking-started");
-      socket.off("match-found");
+      socket.off("connect", handleConnect);
+      socket.off("online-users", handleOnlineUsers);
+      socket.off("user-status-changed", handleUserStatusChanged);
+      socket.off("game-invite-received", handleGameInviteReceived);
+      socket.off("invite-rejected", handleInviteRejected);
+      socket.off("lobby-created", handleLobbyCreated);
+      socket.off("lobby-updated", handleLobbyUpdated);
+      socket.off("lobby-countdown", handleLobbyCountdown);
+      socket.off("lobby-game-start", handleLobbyGameStart);
+      socket.off("lobby-closed", handleLobbyClosed);
+      socket.off("lobby-matchmaking-started", handleLobbyMatchmakingStarted);
+      socket.off("match-found", handleMatchFound);
     };
   }, [userId, router]);
 

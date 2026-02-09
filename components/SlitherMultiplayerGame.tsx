@@ -130,10 +130,14 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
     // Check if already connected (important for lobby game navigation)
     if (socketRef.current.connected) {
       setSocketConnected(true);
+      // Re-emit user-online in case socket reconnected during navigation
+      socketRef.current.emit("user-online", { userId: user.id });
     }
 
     socketRef.current.on("connect", () => {
       setSocketConnected(true);
+      // Re-emit user-online on reconnection
+      socketRef.current?.emit("user-online", { userId: user.id });
     });
 
     socketRef.current.on("connect_error", (err) => {
@@ -166,6 +170,9 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
     });
 
     socketRef.current.on("game-update", (updatedGameState: GameState) => {
+      // Don't process game updates until we've joined (have a playerId)
+      if (!playerIdRef.current) return;
+
       gameStateRef.current = updatedGameState;
       setGameState(updatedGameState);
 
@@ -261,16 +268,49 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
   // Join lobby game when we have lobby data and socket is connected
   useEffect(() => {
     if (lobbyGameData && socketConnected && socketRef.current) {
-      socketRef.current.emit("join-lobby-game", {
-        gameId: lobbyGameData.gameId,
-        odrediserId: user.id,
-      });
+      const emitJoin = () => {
+        socketRef.current?.emit("join-lobby-game", {
+          gameId: lobbyGameData.gameId,
+          odrediserId: user.id,
+        });
+      };
 
-      // Also listen for errors
-      socketRef.current.on("error", (err) => {
+      // Emit join immediately
+      emitJoin();
+
+      // Retry every 2s if we haven't received lobby-game-joined yet
+      const retryInterval = setInterval(() => {
+        if (!playerIdRef.current && socketRef.current?.connected) {
+          emitJoin();
+        } else {
+          clearInterval(retryInterval);
+        }
+      }, 2000);
+
+      // Timeout: if still not joined after 15s, go back to menu
+      const timeout = setTimeout(() => {
+        if (!playerIdRef.current) {
+          clearInterval(retryInterval);
+          setJoiningFromLobby(false);
+          setLobbyGameData(null);
+        }
+      }, 15000);
+
+      const handleError = (err: { message: string }) => {
         console.error("Socket error:", err);
+        clearInterval(retryInterval);
+        clearTimeout(timeout);
         setJoiningFromLobby(false);
-      });
+        setLobbyGameData(null);
+      };
+
+      socketRef.current.on("error", handleError);
+
+      return () => {
+        clearInterval(retryInterval);
+        clearTimeout(timeout);
+        socketRef.current?.off("error", handleError);
+      };
     }
   }, [lobbyGameData, socketConnected, user.id]);
 

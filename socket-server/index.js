@@ -41,8 +41,28 @@ io.on("connection", (socket) => {
   // Handle user online status
   socket.on("user-online", (data) => {
     if (data && data.userId) {
+      // Remove old socket mapping if exists (reconnection)
+      const oldSocketId = userSockets.get(data.userId);
+      if (oldSocketId && oldSocketId !== socket.id) {
+        onlineUsers.delete(oldSocketId);
+      }
+
       onlineUsers.set(socket.id, data.userId);
       userSockets.set(data.userId, socket.id);
+
+      // Update lobby socket ID if user is in a lobby (handles reconnection)
+      const lobbyId = userLobbies.get(data.userId);
+      if (lobbyId) {
+        const lobby = gameLobbies.get(lobbyId);
+        if (lobby) {
+          const lobbyPlayer = lobby.players.find(
+            (p) => p.odrediserId === data.userId
+          );
+          if (lobbyPlayer) {
+            lobbyPlayer.odrediserSocketId = socket.id;
+          }
+        }
+      }
 
       const onlineUserIds = Array.from(userSockets.keys());
       io.emit("online-users", onlineUserIds);
@@ -285,15 +305,22 @@ io.on("connection", (socket) => {
 
     if (playerEntry) {
       const [oldPlayerId, playerData] = playerEntry;
+      const alreadyConnected = playerData.connected;
 
-      delete game.players[oldPlayerId];
+      // Swap socket ID (even if same socket, update to current)
+      if (oldPlayerId !== socket.id) {
+        delete game.players[oldPlayerId];
+      }
       game.players[socket.id] = {
         ...playerData,
         id: socket.id,
         connected: true,
       };
 
-      game.connectedHumans = (game.connectedHumans || 0) + 1;
+      // Only increment connectedHumans if this is the first connection (not a retry)
+      if (!alreadyConnected) {
+        game.connectedHumans = (game.connectedHumans || 0) + 1;
+      }
 
       socket.join(gameId);
 
