@@ -797,7 +797,28 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
       ctx.fillStyle = "white";
       ctx.font = "bold 20px Arial";
       ctx.textAlign = "center";
-      ctx.fillText("👁️ SPECTATING", canvasWidth / 2, 35);
+      ctx.fillText("SPECTATING", canvasWidth / 2, 35);
+    }
+
+    // Draw grace period countdown overlay
+    if (currentGameState.gracePeriodRemaining && currentGameState.gracePeriodRemaining > 0) {
+      ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+      ctx.fillStyle = "white";
+      ctx.font = "bold 72px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`${currentGameState.gracePeriodRemaining}`, canvasWidth / 2, canvasHeight / 2 - 30);
+
+      ctx.fillStyle = "#FFD700";
+      ctx.font = "bold 28px Arial";
+      ctx.fillText("Get Ready!", canvasWidth / 2, canvasHeight / 2 + 40);
+
+      ctx.fillStyle = "#aaa";
+      ctx.font = "18px Arial";
+      ctx.fillText("Game starts in...", canvasWidth / 2, canvasHeight / 2 - 80);
+      ctx.textBaseline = "alphabetic";
     }
   };
 

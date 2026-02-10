@@ -638,6 +638,7 @@ function create5v5Game(socket, playerData) {
     startTime: Date.now(),
     botDifficulty: playerData.botDifficulty || "medium",
     botPositionHistory: {},
+    gracePeriodEnd: Date.now() + 5000,
   };
 
   activeGames.set(gameId, gameState);
@@ -704,6 +705,7 @@ function create1v1Game(socket, playerData) {
     startTime: Date.now(),
     botDifficulty: playerData.botDifficulty || "medium",
     botPositionHistory: {},
+    gracePeriodEnd: Date.now() + 5000,
   };
 
   activeGames.set(gameId, gameState);
@@ -789,6 +791,7 @@ function create2v2Game(socket, playerData) {
     startTime: Date.now(),
     botDifficulty: playerData.botDifficulty || "medium",
     botPositionHistory: {},
+    gracePeriodEnd: Date.now() + 5000,
   };
 
   activeGames.set(gameId, gameState);
@@ -863,6 +866,7 @@ function createBattleRoyaleGame(socket, playerData) {
     startTime: Date.now(),
     botDifficulty: playerData.botDifficulty || "medium",
     botPositionHistory: {},
+    gracePeriodEnd: Date.now() + 5000,
     gameMode: "battleRoyale",
     zone: {
       currentRadius: 2000,
