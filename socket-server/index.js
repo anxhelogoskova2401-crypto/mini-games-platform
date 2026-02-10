@@ -369,7 +369,9 @@ io.on("connection", (socket) => {
       joinMatchmakingQueue(socket, data, gameMode);
     } else {
       // Offline: instant game with bots
-      if (gameMode === "1v1") {
+      if (gameMode === "battleRoyale") {
+        createBattleRoyaleGame(socket, data);
+      } else if (gameMode === "1v1") {
         create1v1Game(socket, data);
       } else if (gameMode === "2v2") {
         create2v2Game(socket, data);
@@ -799,6 +801,86 @@ function create2v2Game(socket, playerData) {
   });
 }
 
+function createBattleRoyaleGame(socket, playerData) {
+  const gameId = `game-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const players = {};
+
+  const getRandomSpawnPosition = () => {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 300 + Math.random() * 1500;
+    return {
+      x: Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius,
+    };
+  };
+
+  const generateRandomColor = () => {
+    const hue = Math.floor(Math.random() * 360);
+    return `hsl(${hue}, 70%, 50%)`;
+  };
+
+  // Add human player
+  const playerPos = getRandomSpawnPosition();
+  players[socket.id] = {
+    id: socket.id,
+    username: playerData.username || "Player",
+    x: playerPos.x,
+    y: playerPos.y,
+    segments: [{ x: playerPos.x, y: playerPos.y }],
+    direction: { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 },
+    score: 0,
+    color: "#FFD700",
+    alive: true,
+    betAmount: playerData.betAmount || 0,
+    isBot: false,
+    team: "ffa",
+  };
+
+  // Add 50 bots
+  for (let i = 1; i <= 50; i++) {
+    const botId = `bot-${gameId}-${i}`;
+    const botPos = getRandomSpawnPosition();
+    players[botId] = {
+      id: botId,
+      username: `Bot ${i}`,
+      x: botPos.x,
+      y: botPos.y,
+      segments: [{ x: botPos.x, y: botPos.y }],
+      direction: { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 },
+      score: 0,
+      color: generateRandomColor(),
+      alive: true,
+      betAmount: 0,
+      isBot: true,
+      team: "ffa",
+    };
+  }
+
+  const gameState = {
+    id: gameId,
+    players,
+    food: generateFood(300),
+    startTime: Date.now(),
+    botDifficulty: playerData.botDifficulty || "medium",
+    botPositionHistory: {},
+    gameMode: "battleRoyale",
+    zone: {
+      currentRadius: 2000,
+      phase: 0,
+      phaseStartTime: Date.now(),
+    },
+  };
+
+  activeGames.set(gameId, gameState);
+  socket.join(gameId);
+
+  socket.emit("match-found", {
+    gameId,
+    playerId: socket.id,
+    gameState: serializeGameState(gameState),
+  });
+}
+
 const PLAYERS_PER_TEAM = { "1v1": 1, "2v2": 2, "5v5": 5 };
 
 function startGameFromLobby(lobbyId) {
@@ -1148,8 +1230,47 @@ function updateGame(game) {
     return;
   }
 
+  // Battle Royale zone shrinking
+  if (game.gameMode === "battleRoyale" && game.zone) {
+    const elapsed = (now - game.startTime) / 1000;
+    const zone = game.zone;
+
+    // Phase transitions: [startTime, endTime, startRadius, endRadius]
+    const phases = [
+      [0, 30, 2000, 2000],     // Phase 0: gathering (no shrink)
+      [30, 90, 2000, 1200],    // Phase 1: slow shrink
+      [90, 150, 1200, 600],    // Phase 2: medium shrink
+      [150, 210, 600, 200],    // Phase 3: fast shrink
+      [210, 270, 200, 50],     // Phase 4: final circle
+    ];
+
+    let currentPhase = 0;
+    for (let i = phases.length - 1; i >= 0; i--) {
+      if (elapsed >= phases[i][0]) {
+        currentPhase = i;
+        break;
+      }
+    }
+
+    zone.phase = currentPhase;
+    const [phaseStart, phaseEnd, startRadius, endRadius] = phases[currentPhase];
+    const phaseProgress = Math.min(1, (elapsed - phaseStart) / (phaseEnd - phaseStart));
+    zone.currentRadius = startRadius - (startRadius - endRadius) * phaseProgress;
+
+    // Clamp after final phase
+    if (elapsed >= 270) {
+      zone.currentRadius = 50;
+    }
+
+    // Remove food outside the zone
+    game.food = game.food.filter((f) => {
+      const dist = Math.sqrt(f.x ** 2 + f.y ** 2);
+      return dist <= zone.currentRadius;
+    });
+  }
+
   // Bot AI constants
-  const WORLD_RADIUS = 1500;
+  const WORLD_RADIUS = game.zone ? game.zone.currentRadius : 1500;
   const RETURN_ENTER_THRESHOLD = WORLD_RADIUS * 0.7;
   const RETURN_EXIT_THRESHOLD = WORLD_RADIUS * 0.55;
   const FOOD_MAX_RADIUS = WORLD_RADIUS * 0.6;
@@ -1187,7 +1308,8 @@ function updateGame(game) {
     let minPreyDist = Infinity;
 
     for (const enemy of enemies) {
-      if (!enemy.alive || enemy.team === bot.team) continue;
+      if (!enemy.alive || enemy.id === bot.id) continue;
+      if (bot.team !== "ffa" && enemy.team === bot.team) continue;
       const dx = enemy.x - bot.x;
       const dy = enemy.y - bot.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1224,7 +1346,8 @@ function updateGame(game) {
         let nearestThreat = null;
         let minDist = Infinity;
         for (const enemy of enemies) {
-          if (!enemy.alive || enemy.team === bot.team) continue;
+          if (!enemy.alive || enemy.id === bot.id) continue;
+          if (bot.team !== "ffa" && enemy.team === bot.team) continue;
           if (enemy.score <= bot.score) continue;
           const dist = Math.sqrt((enemy.x - bot.x) ** 2 + (enemy.y - bot.y) ** 2);
           if (dist < minDist) {
@@ -1246,7 +1369,8 @@ function updateGame(game) {
         let bestPrey = null;
         let minDist = Infinity;
         for (const enemy of enemies) {
-          if (!enemy.alive || enemy.team === bot.team) continue;
+          if (!enemy.alive || enemy.id === bot.id) continue;
+          if (bot.team !== "ffa" && enemy.team === bot.team) continue;
           if (bot.score <= enemy.score + settings.aggressionThreshold) continue;
           const preyDistFromCenter = Math.sqrt(enemy.x ** 2 + enemy.y ** 2);
           if (distFromCenter > FOOD_MAX_RADIUS && preyDistFromCenter > distFromCenter) continue;
@@ -1303,7 +1427,8 @@ function updateGame(game) {
 
     if (state !== "PRESSURE") {
       for (const enemy of enemies) {
-        if (!enemy.alive || enemy.team === bot.team) continue;
+        if (!enemy.alive || enemy.id === bot.id) continue;
+        if (bot.team !== "ffa" && enemy.team === bot.team) continue;
         if (enemy.score <= bot.score) continue;
         const dx = bot.x - enemy.x;
         const dy = bot.y - enemy.y;
@@ -1374,7 +1499,7 @@ function updateGame(game) {
     if (player.segments.length > maxLength) player.segments.pop();
 
     // Boundary check
-    const maxDist = 1500;
+    const maxDist = game.zone ? game.zone.currentRadius : 1500;
     const distFromCenter = Math.sqrt(player.x ** 2 + player.y ** 2);
     if (distFromCenter > maxDist) {
       player.alive = false;
@@ -1394,7 +1519,7 @@ function updateGame(game) {
       const otherPlayer = game.players[otherPlayerId];
       if (!otherPlayer.alive) return;
 
-      const sameTeam = player.team === otherPlayer.team;
+      const sameTeam = player.team !== "ffa" && player.team === otherPlayer.team;
       if (sameTeam) return;
 
       otherPlayer.segments.forEach((segment, index) => {
@@ -1430,9 +1555,11 @@ function updateGame(game) {
   });
 
   // Replenish food
-  while (game.food.length < 150) {
+  const maxFood = game.gameMode === "battleRoyale" ? 300 : 150;
+  const maxFoodRadius = game.zone ? game.zone.currentRadius * 0.9 : 1400;
+  while (game.food.length < maxFood) {
     const angle = Math.random() * Math.PI * 2;
-    const radius = Math.random() * 1400;
+    const radius = Math.random() * maxFoodRadius;
     game.food.push({
       x: Math.cos(angle) * radius,
       y: Math.sin(angle) * radius,
@@ -1467,6 +1594,8 @@ function serializeGameState(game) {
     gracePeriodRemaining,
     connectedHumans: game.connectedHumans || 0,
     expectedHumans: game.expectedHumans || 0,
+    gameMode: game.gameMode || null,
+    zone: game.zone || null,
   };
 }
 

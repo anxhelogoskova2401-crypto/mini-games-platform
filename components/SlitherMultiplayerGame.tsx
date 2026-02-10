@@ -23,7 +23,7 @@ interface Player {
   score: number;
   color: string;
   alive: boolean;
-  team: "green" | "red";
+  team: "green" | "red" | "ffa";
   isBot: boolean;
   ping?: number;
 }
@@ -36,6 +36,11 @@ interface GameState {
   gracePeriodRemaining?: number;
   connectedHumans?: number;
   expectedHumans?: number;
+  gameMode?: string;
+  zone?: {
+    currentRadius: number;
+    phase: number;
+  };
 }
 
 export default function SlitherMultiplayerGame({ user }: { user: User }) {
@@ -59,7 +64,7 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
   const [winner, setWinner] = useState<string | null>(null);
   const [playerTeam, setPlayerTeam] = useState<string | null>(null);
   const [playMode, setPlayMode] = useState<"online" | "offline">("offline");
-  const [gameMode, setGameMode] = useState<"1v1" | "2v2" | "5v5">("5v5");
+  const [gameMode, setGameMode] = useState<"1v1" | "2v2" | "5v5" | "battleRoyale">("5v5");
   const [botDifficulty, setBotDifficulty] = useState<"easy" | "medium" | "hard">("medium");
 
   // Menu & Settings
@@ -182,25 +187,40 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
         setPlayerDead(true);
       }
 
-      // Check if game is over - team based
-      const greenTeam = updatedGameState.players.filter((p) => p.team === "green" && p.alive);
-      const redTeam = updatedGameState.players.filter((p) => p.team === "red" && p.alive);
-
-      if (greenTeam.length === 0 && redTeam.length > 0) {
-        setWinner("Red Team");
-        setGameOver(true);
-        // Check if player won (red team player)
-        const playerData = updatedGameState.players.find((p) => p.id === playerIdRef.current);
-        if (playerData && playerData.team === "red") {
-          handleWin();
+      // Check if game is over
+      if (updatedGameState.gameMode === "battleRoyale") {
+        // Battle Royale: last player standing wins
+        const alivePlayers = updatedGameState.players.filter((p) => p.alive);
+        if (alivePlayers.length <= 1) {
+          if (alivePlayers.length === 1) {
+            setWinner(alivePlayers[0].username);
+            if (alivePlayers[0].id === playerIdRef.current) {
+              handleWin();
+            }
+          } else {
+            setWinner("Nobody");
+          }
+          setGameOver(true);
         }
-      } else if (redTeam.length === 0 && greenTeam.length > 0) {
-        setWinner("Green Team");
-        setGameOver(true);
-        // Check if player won (green team player)
-        const playerData = updatedGameState.players.find((p) => p.id === playerIdRef.current);
-        if (playerData && playerData.team === "green") {
-          handleWin();
+      } else {
+        // Team-based win condition
+        const greenTeam = updatedGameState.players.filter((p) => p.team === "green" && p.alive);
+        const redTeam = updatedGameState.players.filter((p) => p.team === "red" && p.alive);
+
+        if (greenTeam.length === 0 && redTeam.length > 0) {
+          setWinner("Red Team");
+          setGameOver(true);
+          const playerData = updatedGameState.players.find((p) => p.id === playerIdRef.current);
+          if (playerData && playerData.team === "red") {
+            handleWin();
+          }
+        } else if (redTeam.length === 0 && greenTeam.length > 0) {
+          setWinner("Green Team");
+          setGameOver(true);
+          const playerData = updatedGameState.players.find((p) => p.id === playerIdRef.current);
+          if (playerData && playerData.team === "green") {
+            handleWin();
+          }
         }
       }
     });
@@ -556,12 +576,24 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
     }
     ctx.stroke();
 
-    // Draw boundary circle
+    // Draw boundary/zone circle
+    const boundaryRadius = currentGameState.zone?.currentRadius ?? 1500;
     ctx.strokeStyle = "#ff4444";
     ctx.lineWidth = 5;
     ctx.beginPath();
-    ctx.arc(0, 0, 1500, 0, Math.PI * 2);
+    ctx.arc(0, 0, boundaryRadius, 0, Math.PI * 2);
     ctx.stroke();
+
+    // Draw danger zone fill outside circle for BR
+    if (currentGameState.gameMode === "battleRoyale" && currentGameState.zone) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(-3000, -3000, 6000, 6000);
+      ctx.arc(0, 0, boundaryRadius, 0, Math.PI * 2, true);
+      ctx.fillStyle = "rgba(255, 0, 0, 0.15)";
+      ctx.fill();
+      ctx.restore();
+    }
 
     // Draw food (optimized - batch operations)
     ctx.fillStyle = "#FFA500";
@@ -608,26 +640,48 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
 
     ctx.restore();
 
-    // Draw team scores HUD
-    const greenTeam = currentGameState.players.filter((p) => p.team === "green");
-    const redTeam = currentGameState.players.filter((p) => p.team === "red");
-    const greenAlive = greenTeam.filter((p) => p.alive).length;
-    const redAlive = redTeam.filter((p) => p.alive).length;
-    const greenScore = greenTeam.reduce((sum, p) => sum + p.score, 0);
-    const redScore = redTeam.reduce((sum, p) => sum + p.score, 0);
+    // Draw HUD
+    if (currentGameState.gameMode === "battleRoyale") {
+      // Battle Royale HUD
+      const aliveCount = currentGameState.players.filter((p) => p.alive).length;
+      ctx.fillStyle = "white";
+      ctx.font = "bold 32px Arial";
+      ctx.textAlign = "left";
+      ctx.fillText(`Alive: ${aliveCount}`, 20, 50);
 
-    // Draw team scores at top
-    const greenTotal = greenTeam.length;
-    const redTotal = redTeam.length;
+      if (currentGameState.zone) {
+        const phaseNames = ["Gathering", "Closing In", "Tightening", "Danger Zone", "Final Circle"];
+        const phaseName = phaseNames[currentGameState.zone.phase] || "Active";
+        ctx.fillStyle = "#FFD700";
+        ctx.font = "bold 24px Arial";
+        ctx.textAlign = "right";
+        ctx.fillText(phaseName, canvasWidth - 20, 50);
 
-    ctx.fillStyle = "#00e701";
-    ctx.font = "bold 32px Arial";
-    ctx.textAlign = "left";
-    ctx.fillText(`Green: ${greenScore} (${greenAlive}/${greenTotal})`, 20, 50);
+        ctx.fillStyle = "#ff4444";
+        ctx.font = "18px Arial";
+        ctx.fillText(`Zone: ${Math.floor(currentGameState.zone.currentRadius)}`, canvasWidth - 20, 75);
+      }
+    } else {
+      // Team scores HUD
+      const greenTeam = currentGameState.players.filter((p) => p.team === "green");
+      const redTeam = currentGameState.players.filter((p) => p.team === "red");
+      const greenAlive = greenTeam.filter((p) => p.alive).length;
+      const redAlive = redTeam.filter((p) => p.alive).length;
+      const greenScore = greenTeam.reduce((sum, p) => sum + p.score, 0);
+      const redScore = redTeam.reduce((sum, p) => sum + p.score, 0);
 
-    ctx.fillStyle = "#ff4444";
-    ctx.textAlign = "right";
-    ctx.fillText(`Red: ${redScore} (${redAlive}/${redTotal})`, canvasWidth - 20, 50);
+      const greenTotal = greenTeam.length;
+      const redTotal = redTeam.length;
+
+      ctx.fillStyle = "#00e701";
+      ctx.font = "bold 32px Arial";
+      ctx.textAlign = "left";
+      ctx.fillText(`Green: ${greenScore} (${greenAlive}/${greenTotal})`, 20, 50);
+
+      ctx.fillStyle = "#ff4444";
+      ctx.textAlign = "right";
+      ctx.fillText(`Red: ${redScore} (${redAlive}/${redTotal})`, canvasWidth - 20, 50);
+    }
 
     // Draw elapsed time
     const elapsed = Math.floor((Date.now() - currentGameState.startTime) / 1000);
@@ -697,7 +751,8 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
       const minimapSize = 200;
       const minimapX = canvasWidth - minimapSize - 20;
       const minimapY = canvasHeight - minimapSize - 20;
-      const scale = minimapSize / 3000;
+      const worldDiameter = currentGameState.gameMode === "battleRoyale" ? 4000 : 3000;
+      const scale = minimapSize / worldDiameter;
 
       ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
       ctx.fillRect(minimapX, minimapY, minimapSize, minimapSize);
@@ -707,12 +762,13 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
       ctx.strokeRect(minimapX, minimapY, minimapSize, minimapSize);
 
       // Draw boundary on minimap
+      const minimapBoundaryRadius = (currentGameState.zone?.currentRadius ?? 1500) * scale;
       ctx.strokeStyle = "#ff4444";
       ctx.beginPath();
       ctx.arc(
         minimapX + minimapSize / 2,
         minimapY + minimapSize / 2,
-        1500 * scale,
+        minimapBoundaryRadius,
         0,
         Math.PI * 2
       );
@@ -763,6 +819,7 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
               {gameMode === "1v1" && "1v1 battle! You vs 1 enemy bot. (1 bot total)"}
               {gameMode === "2v2" && "2v2 battle! You + 1 teammate bot vs 2 enemy bots. (3 bots total)"}
               {gameMode === "5v5" && "5v5 battle! You + 4 teammate bots vs 5 enemy bots. (9 bots total)"}
+              {gameMode === "battleRoyale" && "Battle Royale! Free-for-all with 50 bots. Shrinking zone. Last one standing wins!"}
             </p>
 
             {/* Play Mode Selector */}
@@ -797,7 +854,7 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
             {/* Game Mode Selector */}
             <div className="mb-6">
               <label className="block text-gray-400 mb-2 text-sm">Select Game Mode:</label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => setGameMode("1v1")}
                   className={`py-3 px-4 rounded-lg font-bold transition-all ${
@@ -827,6 +884,17 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
                   }`}
                 >
                   5v5
+                </button>
+                <button
+                  onClick={() => setGameMode("battleRoyale")}
+                  className={`py-3 px-4 rounded-lg font-bold transition-all ${
+                    gameMode === "battleRoyale"
+                      ? "bg-purple-600 text-white"
+                      : "bg-[#0f212e] text-gray-400 hover:bg-[#213743]"
+                  }`}
+                >
+                  <div>Battle Royale</div>
+                  <div className="text-xs font-normal mt-1">50 Players</div>
                 </button>
               </div>
             </div>
@@ -1078,16 +1146,24 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
         {gameOver && (
           <div className="bg-[#1a2c38] p-8 rounded-xl max-w-md z-50 relative">
             <h2 className="text-3xl font-bold text-white mb-4">
-              {winner === playerTeam
-                ? "🎉 Victory!"
-                : "💀 Defeat"}
+              {gameState?.gameMode === "battleRoyale"
+                ? (winner === gameState?.players.find((p) => p.id === playerId)?.username
+                    ? "Champion!"
+                    : "Eliminated")
+                : (winner === playerTeam
+                    ? "Victory!"
+                    : "Defeat")}
             </h2>
             <div className="bg-[#0f212e] p-6 rounded-lg mb-6">
               <div className="text-2xl font-bold text-yellow-400 mb-2">
-                {winner} Wins!
+                {gameState?.gameMode === "battleRoyale"
+                  ? `${winner} is the Champion!`
+                  : `${winner} Wins!`}
               </div>
               {playMode === "online" ? (
-                winner === playerTeam ? (
+                (gameState?.gameMode === "battleRoyale"
+                  ? winner === gameState?.players.find((p) => p.id === playerId)?.username
+                  : winner === playerTeam) ? (
                   <div className="text-green-400 mt-4 font-bold text-xl">
                     +{betAmount * 2} coins earned!
                   </div>
@@ -1114,7 +1190,7 @@ export default function SlitherMultiplayerGame({ user }: { user: User }) {
               href="/dashboard"
               className="block text-blue-400 hover:text-blue-300"
             >
-              ← Back to Dashboard
+              Back to Dashboard
             </a>
           </div>
         )}
